@@ -70,18 +70,27 @@ const TherapyChat = () => {
     setInputValue('');
     setIsTyping(true);
 
-    // Analyze sentiment locally
-    const sentimentChange = analyzeSentiment(inputValue);
-    adjustPlantHealth(sentimentChange);
-
     try {
-      // Create request body
       const requestBody = {
-        model: "RichardErkhov/epsilon3_-_cbt-llama3-8b-finetuned-gguf",
+        model: "lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF",
         messages: [
           {
             role: "system",
-            content: "You are a CBT therapist helping users practice cognitive behavioral therapy. Keep responses concise, supportive, and focused on CBT techniques."
+            content: `You are a CBT therapist helping users practice cognitive behavioral therapy. 
+            For each user message, provide TWO things:
+            1. A sentiment score from -10 to +10 based on thinking patterns:
+               * -10 to -7: Very unhealthy (catastrophizing, black-and-white thinking)
+               * -6 to -3: Moderately unhealthy (overgeneralization, emotional reasoning)
+               * -2 to +2: Neutral or mixed thinking patterns
+               * +3 to +6: Moderately healthy (balanced thinking, evidence-based)
+               * +7 to +10: Very healthy (growth mindset, cognitive flexibility)
+            2. A therapeutic response
+
+            Format your response exactly like this:
+            [SCORE]: <number>
+            [RESPONSE]: <your therapeutic response>
+
+            Keep responses concise, supportive, and focused on CBT techniques.`
           },
           {
             role: "user",
@@ -92,9 +101,8 @@ const TherapyChat = () => {
         max_tokens: 500
       };
 
-      console.log('Sending request with body:', requestBody); // Debug log
+      console.log('Sending request...'); // Debug log
 
-      // Call the local LM Studio server
       const response = await fetch('/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -104,28 +112,35 @@ const TherapyChat = () => {
         body: JSON.stringify(requestBody)
       });
 
-      console.log('Response status:', response.status); // Debug log
+      const data = await response.json();
+      const fullResponse = data.choices[0].message.content;
+      
+      console.log('Raw LLM response:', fullResponse); // Debug log
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Error response:', errorText); // Debug log
-        throw new Error(`HTTP error! status: ${response.status}`);
+      // Updated parsing logic
+      const scoreMatch = fullResponse.match(/\[([-\d.]+)\]:/);  // Changed from [SCORE] to just []
+      const responseText = fullResponse.replace(/\[([-\d.]+)\]:/, '').trim();
+
+      if (scoreMatch) {
+        const sentimentScore = parseFloat(scoreMatch[1]);
+        console.log('Parsed score:', sentimentScore); // Debug log
+        
+        // Convert -10 to +10 score to plant health change (-15 to +15)
+        const healthChange = (sentimentScore / 10) * 15;
+        adjustPlantHealth(healthChange);
+
+        // Only show the therapeutic response to the user
+        setMessages(prev => [...prev, {
+          id: Date.now(),
+          text: responseText,
+          sender: 'therapist',
+        }]);
+      } else {
+        throw new Error('Failed to parse LLM response');
       }
 
-      const data = await response.json();
-      console.log('LLM Response:', data); // Debug log
-
-      const therapistResponse = data.choices[0].message.content;
-
-      // Add therapist's response to chat
-      setMessages(prev => [...prev, {
-        id: Date.now(),
-        text: therapistResponse,
-        sender: 'therapist',
-      }]);
-
     } catch (error) {
-      console.error('Full error:', error); // Debug log
+      console.error('Full error:', error);
       setMessages(prev => [...prev, {
         id: Date.now(),
         text: "I'm having trouble connecting. Let's keep focusing on your thoughts.",
