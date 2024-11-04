@@ -9,6 +9,7 @@ const TherapyChat = () => {
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [showTestControls, setShowTestControls] = useState(false);
   const chatEndRef = useRef(null);
+  const [isTyping, setIsTyping] = useState(false);
 
   const onboardingMessages = [
     "Hi! I'm your CBT companion. I'm here to help you practice healthier thinking patterns. See that plant? It represents your thought patterns' health. Let's try something - could you share a negative thought you've had recently?",
@@ -57,7 +58,7 @@ const TherapyChat = () => {
     return `rgb(${r}, ${g}, ${b})`;
   };
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     if (!inputValue.trim()) return;
 
     const newMessage = {
@@ -66,23 +67,73 @@ const TherapyChat = () => {
       sender: 'user'
     };
     setMessages(prev => [...prev, newMessage]);
+    setInputValue('');
+    setIsTyping(true);
 
     // Analyze sentiment locally
     const sentimentChange = analyzeSentiment(inputValue);
     adjustPlantHealth(sentimentChange);
 
-    // Add a simple response from the "therapist"
-    const responseText = sentimentChange > 0 ? 
-      "That's a great perspective! Keep it up." : 
-      "Let's try to find a more positive angle.";
+    try {
+      // Create request body
+      const requestBody = {
+        model: "RichardErkhov/epsilon3_-_cbt-llama3-8b-finetuned-gguf",
+        messages: [
+          {
+            role: "system",
+            content: "You are a CBT therapist helping users practice cognitive behavioral therapy. Keep responses concise, supportive, and focused on CBT techniques."
+          },
+          {
+            role: "user",
+            content: inputValue
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 500
+      };
 
-    setMessages(prev => [...prev, {
-      id: Date.now(),
-      text: responseText,
-      sender: 'therapist',
-    }]);
+      console.log('Sending request with body:', requestBody); // Debug log
 
-    setInputValue('');
+      // Call the local LM Studio server
+      const response = await fetch('/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      console.log('Response status:', response.status); // Debug log
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error response:', errorText); // Debug log
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('LLM Response:', data); // Debug log
+
+      const therapistResponse = data.choices[0].message.content;
+
+      // Add therapist's response to chat
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        text: therapistResponse,
+        sender: 'therapist',
+      }]);
+
+    } catch (error) {
+      console.error('Full error:', error); // Debug log
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        text: "I'm having trouble connecting. Let's keep focusing on your thoughts.",
+        sender: 'therapist',
+      }]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   const handleSubmit = (e) => {
@@ -402,6 +453,18 @@ const TherapyChat = () => {
                 </div>
               </div>
             ))}
+            
+            {/* Typing Indicator */}
+            {isTyping && (
+              <div className="mb-4 flex justify-start">
+                <div className="typing-indicator">
+                  <div className="typing-circle"></div>
+                  <div className="typing-circle"></div>
+                  <div className="typing-circle"></div>
+                </div>
+              </div>
+            )}
+            
             <div ref={chatEndRef} />
           </div>
 
