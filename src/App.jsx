@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Minus, Plus } from 'lucide-react';
 import './index.css';  
+import Sentiment from 'sentiment';
 //hi
 const TherapyChat = () => {
   const [messages, setMessages] = useState([]);
@@ -18,6 +19,8 @@ const TherapyChat = () => {
     "Great job! See how the plant grew when you practiced reframing? This is what CBT is all about - learning to recognize and adjust our thought patterns. Would you like to continue practicing?"
   ];
 
+  const sentiment = new Sentiment();
+
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([{
@@ -30,22 +33,19 @@ const TherapyChat = () => {
   }, []);
 
   const analyzeSentiment = (message) => {
-    const negativeWords = ['hate', 'terrible', 'awful', 'bad', 'never', 'worst', 'hopeless'];
-    const cbtPatterns = [
-      'realize', 'perspective', 'evidence', 'thinking', 'rational',
-      'reframe', 'alternative', 'practice', 'learn', 'growth'
-    ];
+    const result = sentiment.analyze(message);
     
-    const hasNegative = negativeWords.some(word => message.toLowerCase().includes(word));
-    const hasCBT = cbtPatterns.some(word => message.toLowerCase().includes(word));
+    // Convert sentiment.js score (-5 to 5 scale) to our -10 to 10 scale
+    const normalizedScore = Math.max(-10, Math.min(10, result.score * 2));
     
-    if (hasNegative) return -15;
-    if (hasCBT) {
-      const baseGrowth = 15;
-      const remainingGrowth = 100 - plantHealth;
-      return baseGrowth * (remainingGrowth / 100);
-    }
-    return 0;
+    console.log('Sentiment analysis:', {
+      score: normalizedScore,
+      comparative: result.comparative,
+      tokens: result.tokens,
+      words: result.words
+    });
+
+    return normalizedScore;
   };
 
   const getLeafColor = (health) => {
@@ -72,78 +72,62 @@ const TherapyChat = () => {
     setIsTyping(true);
 
     try {
-      const requestBody = {
-        model: "lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF",
-        messages: [
-          {
-            role: "system",
-            content: `You are a CBT therapist helping users practice cognitive behavioral therapy. 
-            For each user message, provide TWO things:
-            1. A sentiment score from -10 to +10 based on thinking patterns:
-               * -10 to -7: Very unhealthy (catastrophizing, black-and-white thinking)
-               * -6 to -3: Moderately unhealthy (overgeneralization, emotional reasoning)
-               * -2 to +2: Neutral or mixed thinking patterns
-               * +3 to +6: Moderately healthy (balanced thinking, evidence-based)
-               * +7 to +10: Very healthy (growth mindset, cognitive flexibility)
-            2. A therapeutic response
+      // Get conversation history
+      const conversationHistory = messages.map(msg => ({
+        role: msg.sender === 'user' ? 'user' : 'assistant',
+        content: msg.text
+      }));
 
-            Format your response exactly like this:
-            [SCORE]: <number>
-            [RESPONSE]: <your therapeutic response>
-
-            Keep responses concise, supportive, and focused on CBT techniques.`
-          },
-          {
-            role: "user",
-            content: inputValue
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 500
-      };
-
-      console.log('Sending request...'); // Debug log
-
+      // Analyze sentiment locally
+      const sentimentScore = analyzeSentiment(inputValue);
+      
+      // Get therapeutic response from LLM
       const response = await fetch('/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json',
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "system",
+              content: `You are a CBT therapist helping users practice cognitive behavioral therapy. 
+              Provide supportive, empathetic responses that help users identify and reframe negative thought patterns.
+              Keep responses concise and focused on CBT techniques.`
+            },
+            ...conversationHistory,
+            {
+              role: "user",
+              content: inputValue
+            }
+          ],
+          model: "lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF",
+          temperature: 0.7,
+          max_tokens: 500
+        })
       });
 
-      const data = await response.json();
-      const fullResponse = data.choices[0].message.content;
-      
-      console.log('Raw LLM response:', fullResponse); // Debug log
-
-      // Updated parsing logic
-      const scoreMatch = fullResponse.match(/\[([-\d.]+)\]:/);  // Changed from [SCORE] to just []
-
-      if (scoreMatch) {
-        const sentimentScore = parseFloat(scoreMatch[1]);
-        console.log('Parsed score:', sentimentScore); // Debug log
-        
-        // Clean up the response text by removing both the score and any [RESPONSE]: tag
-        const responseText = fullResponse
-          .replace(/\[([-\d.]+)\]:/, '')  // Remove score
-          .replace(/\[RESPONSE\]:?/i, '')  // Remove [RESPONSE]: tag (case insensitive)
-          .trim();  // Remove extra whitespace
-
-        adjustPlantHealth(sentimentScore);
-
-        setMessages(prev => [...prev, {
-          id: Date.now(),
-          text: responseText,
-          sender: 'therapist',
-        }]);
-      } else {
-        throw new Error('Failed to parse LLM response');
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('LLM API Error:', errorData);
+        throw new Error('API request failed');
       }
 
+      const data = await response.json();
+      const therapeuticResponse = data.choices[0].message.content.trim();
+
+      // Update plant based on sentiment
+      adjustPlantHealth(sentimentScore);
+
+      // Add only the therapeutic response to the chat
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        text: therapeuticResponse,
+        sender: 'therapist',
+      }]);
+
     } catch (error) {
-      console.error('Full error:', error);
+      console.error('Error in sendMessage:', error);
       setMessages(prev => [...prev, {
         id: Date.now(),
         text: "I'm having trouble connecting. Let's keep focusing on your thoughts.",
