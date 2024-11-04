@@ -10,6 +10,7 @@ const TherapyChat = () => {
   const [showTestControls, setShowTestControls] = useState(false);
   const chatEndRef = useRef(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [lastSentimentChange, setLastSentimentChange] = useState(0);
 
   const onboardingMessages = [
     "Hi! I'm your CBT companion. I'm here to help you practice healthier thinking patterns. See that plant? It represents your thought patterns' health. Let's try something - could you share a negative thought you've had recently?",
@@ -119,17 +120,19 @@ const TherapyChat = () => {
 
       // Updated parsing logic
       const scoreMatch = fullResponse.match(/\[([-\d.]+)\]:/);  // Changed from [SCORE] to just []
-      const responseText = fullResponse.replace(/\[([-\d.]+)\]:/, '').trim();
 
       if (scoreMatch) {
         const sentimentScore = parseFloat(scoreMatch[1]);
         console.log('Parsed score:', sentimentScore); // Debug log
         
-        // Convert -10 to +10 score to plant health change (-15 to +15)
-        const healthChange = (sentimentScore / 10) * 15;
-        adjustPlantHealth(healthChange);
+        // Clean up the response text by removing both the score and any [RESPONSE]: tag
+        const responseText = fullResponse
+          .replace(/\[([-\d.]+)\]:/, '')  // Remove score
+          .replace(/\[RESPONSE\]:?/i, '')  // Remove [RESPONSE]: tag (case insensitive)
+          .trim();  // Remove extra whitespace
 
-        // Only show the therapeutic response to the user
+        adjustPlantHealth(sentimentScore);
+
         setMessages(prev => [...prev, {
           id: Date.now(),
           text: responseText,
@@ -160,8 +163,20 @@ const TherapyChat = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const adjustPlantHealth = (change) => {
-    setPlantHealth(prev => Math.max(0, Math.min(prev + change, 100)));
+  const adjustPlantHealth = (score) => {
+    // Define how much to change the plant by
+    const GROWTH_AMOUNT = 10;  // Plant grows/shrinks by 10% each time
+    
+    // Determine if sentiment is positive or negative
+    const healthChange = score > 0 ? GROWTH_AMOUNT : -GROWTH_AMOUNT;
+    
+    setLastSentimentChange(healthChange);  // Store the change for visual feedback
+    
+    // Update plant health with limits
+    setPlantHealth(prev => {
+      const newHealth = Math.max(0, Math.min(100, prev + healthChange));
+      return newHealth;
+    });
   };
 
   // Adjust the growth scaling function
