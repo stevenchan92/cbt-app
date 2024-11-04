@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.leaf-grow {
+  animation: grow 1s ease-out forwards;
+}
+
+.sunflower-spin {
+  animation: spin 20s linear infinite;
+}
+
+.plant-sway {
+  animation: sway 3s ease-in-out infinite;
+}
+
+@keyframes grow {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes sway {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(5deg);
+  }
+}
